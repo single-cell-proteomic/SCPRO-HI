@@ -48,5 +48,5 @@ or just calling as a function:
 
 In both cases, the algorithm returns a scData object, which serves as a container for the individual annData objects of each dataset and the concatenated annData object of all datasets. The concatenated dataset is stored in the .whole attribute of the scData object, and the list of individual datasets can be accessed through the .dataset_list attribute.
 
-The integrated measurements are stored in the **.obsm** attribute of the concatenated dataset, with the name of the integration method serving as the key. For an example of how to use the proposed algorithm and reproduce the results in the paper, please refer to the **tutorial.ipynb** notebook.
+The integrated measurements are stored in the **.obsm** attribute of the concatenated dataset, with the name of the integration method serving as the key. For an example of how to use the proposed algorithm and reproduce the results in the paper, please refer to the [tutorial.ipynb](tutorial.ipynb) notebook.
 
