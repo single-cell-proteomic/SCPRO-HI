@@ -1,9 +1,10 @@
 # Integration of Single-cell Proteomic Datasets Through Distinctive Proteins in Cell Clusters
-This repository contains the code of SCPRO-HI algorithm and more for reproduction of experimental results in the submitted paper.
+This repository contains the code for the SCPRO-HI algorithm and additional materials to reproduce the experimental results described in the submitted paper.
 
 ## System requirements
 
  The code is tested on Python version >= 3.6. Following Python packages are required:
+ 
 - Pip3
 - Pandas
 - Numpy
@@ -17,7 +18,8 @@ This repository contains the code of SCPRO-HI algorithm and more for reproductio
 - umap
 
 
-The packages shown below are installed automatically by the code using Pip3:
+The following packages are automatically installed by the code using Pip3:
+
 - harmonypy
 - mnnpy
 - scanorama
@@ -28,15 +30,15 @@ The packages shown below are installed automatically by the code using Pip3:
 
 **Data format**
 
-The SCPRO-HI algorithm and reproduction pipeline accepts single-cell datasets in annData format (with .h5ad file extension). All the datasets will be integrated have to be in the same directory and the path of that directory is given to the driver function.
+The SCPRO-HI algorithm and reproduction pipeline accept single-cell datasets in annData format (with the .h5ad file extension). All datasets to be integrated must be located in the same directory and the path to that directory must be provided to the driver function.
 
 **Demo**
 
-Run the **SCPRO.py** file in the command line by passing **SCPRO-HI** as method parameter and the path of the single-cell datasets' directory, respectively. Please note that, if **All** is provided for the 'method' parameter, than all the algorithms in the paper are executed.
+To run the **SCPRO.py** file in the command line, pass 'SCPRO-HI' as the method parameter and the path to the directory containing the single-cell datasets. If you would like to execute all the algorithms in the paper, provide 'All' as the value for the 'method' parameter. Note that this will run all algorithms.
 
 **Quick start**
 
-The model can be tested by running **SCPRO.py** file in command line or calling **scprohi_run()** function from **SCPRO.py** file in the code block. Use the following command for calling in Terminal:
+The algorithm can be tested by either running the **SCPRO.py** file in the command line or calling the **scprohi_run()** function from the **SCPRO.py** file in a code block. To run the file in the Terminal, use the following command:
 
 `$ python3 SCPRO.py "SCPRO-HI" datasets_directory_path
 
@@ -44,9 +46,7 @@ or just calling as a function:
 
 `scData = scprohi_run(method, data_path)`
 
-In both cases, the algorithm returns a scData object which is a wrapper for holding both individual annData objects of each datasets and the concatenated annData object of them.
-The concatenated dataset is stored in **.whole** feature of scData object and the list of the individual datasets is accesiable in **.dataset_list** feature.
-The integrated measurements are stored in **.obsm** of the concatenated dataset with the name of the integration method as the key.
+In both cases, the algorithm returns a scData object, which serves as a container for the individual annData objects of each dataset and the concatenated annData object of all datasets. The concatenated dataset is stored in the .whole attribute of the scData object, and the list of individual datasets can be accessed through the .dataset_list attribute.
 
-Please see the **tutorial.ipynb** notebook for an example usage of the proposed algorithm and also how to reproduce the results in the paper.
+The integrated measurements are stored in the **.obsm** attribute of the concatenated dataset, with the name of the integration method serving as the key. For an example of how to use the proposed algorithm and reproduce the results in the paper, please refer to the **tutorial.ipynb** notebook.
 
