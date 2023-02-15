@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 from plotly.subplots import make_subplots
 import scib
+import scanpy as sc
 from scib.metrics import lisi
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, adjusted_rand_score, normalized_mutual_info_score

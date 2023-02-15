@@ -1,14 +1,15 @@
 import numpy as np
 import pandas as pd
 import pip
+import scanpy as sc
 
-def calc_preds(self, aData):
+def calc_preds(aData):
     preds = []
     sc.pp.neighbors(aData)
     print("neighbors are calculating!")
     for i in range (aData.shape[0]):
         nbrs = aData.obsp["connectivities"][i].tocoo().col
-        pred = max(set(exp_data.whole[nbrs].obs["cluster_s"]), key = exp_data.whole[nbrs].obs["cluster_s"].tolist().count)
+        pred = max(set(aData[nbrs].obs["cluster_s"]), key = aData[nbrs].obs["cluster_s"].tolist().count)
         preds.append(pred)
     return np.array(preds)
 
@@ -37,9 +38,8 @@ def MNN(exp_data):
     hvg = exp_data.whole.var.index.tolist()
     _datasets = []
     for db in exp_data.dataset_list:
-        _db = exp_data.dataset_list
-        _db.obs.index = _db.obs.index.map(int)
-        _datasets.append(_db)
+        db.obs.index = db.obs.index.map(int)
+        _datasets.append(db)
     corrected  = mnnpy.mnn_correct(_datasets, var_subset = hvg)
     whole_data = []
     for res in corrected[0]:

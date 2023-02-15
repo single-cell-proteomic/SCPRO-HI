@@ -29,12 +29,11 @@ def calc_preds(aData):
 def find_mutual_nn(data1, data2, k1, k2):
     if k1 > min(data1.shape[0], data2.shape[0]) or k2 > min(data1.shape[0], data2.shape[0]):
         k1 = k2 = min(data1.shape[0], data2.shape[0])
-    print(data1.shape[0], data2.shape[0])
+    # print(data1.shape[0], data2.shape[0])
     k_index_1 = cKDTree(data1).query(x=data2, k=k1)[1]
     k_index_2 = cKDTree(data2).query(x=data1, k=k2)[1]
     mutual_1 = []
     mutual_2 = []
-    print("here")
     for index_2 in range(k2):
         for index_1 in k_index_1[index_2]:
             if index_2 in k_index_2[index_1]:
@@ -45,7 +44,7 @@ def find_mutual_nn(data1, data2, k1, k2):
 def find_mutual_nn2(data1, data2, k1, k2):
     if k1 > min(data1.shape[0], data2.shape[0]) or k2 > min(data1.shape[0], data2.shape[0]):
         k1 = k2 = min(data1.shape[0], data2.shape[0])
-    print(data1.shape[0], data2.shape[0], k1, k2)
+    # print(data1.shape[0], data2.shape[0], k1, k2)
     k_index_1 = cKDTree(data1).query(x=data2, k=k1)[1]
     k_index_2 = cKDTree(data2).query(x=data1, k=k2)[1]
     mutual_1 = []
@@ -282,7 +281,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
             r_batch_relations[cluster] = new_group
             unmatched_clusters.remove(cluster)
         g_counter +=1
-        print("new_group ---->", new_group, " : ", components[new_group])
+        # print("new_group ---->", new_group, " : ", components[new_group])
 
     batch_list = {}
     new_groups = []
@@ -304,7 +303,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
         r_batch_relations[cluster] = batch_list[batch_idx]
 
     for group in new_groups:
-        print("Batch group -> ", group, components[group])
+        # print("Batch group -> ", group, components[group])
 
     exp_data.whole.obs["group_id"] = np.array(["no-group" if cell not in r_batch_relations else r_batch_relations[cell] for cell in exp_data.whole.obs["cluster_id"]])
 
@@ -344,7 +343,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
                         if len(m1) > 0:
                             q_cells_i = query_cells.obs.index.to_numpy()[m1]
                             t_cells_i = target_cells.obs.index.to_numpy()[m2]
-                            print(q_cells_i.shape[0], t_cells_i.shape[0], len(m1))
+                            # print(q_cells_i.shape[0], t_cells_i.shape[0], len(m1))
                             cell_mappings[group].extend(list(zip(q_cells_i,t_cells_i)))
                             ## for negative samples
                             neg_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == diff_map[cluster_q]]
@@ -355,7 +354,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
                 else:
                     target_cells = exp_data.whole[exp_data.whole.obs["cluster_id"].isin(target_group)]
                     m1, m2 = find_mutual_nn2(query_cells.X, target_cells.X, 200, 200)
-                    print(query_cells.shape[0], target_cells.shape[0], len(m1))
+                    # print(query_cells.shape[0], target_cells.shape[0], len(m1))
                     if len(m1) > 0:
                         q_cells_i = query_cells.obs.index.to_numpy()[m1]
                         t_cells_i = target_cells.obs.index.to_numpy()[m2]
@@ -391,10 +390,10 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
             neg_targets = neg_cells.obs.index.to_numpy()[np.random.choice(neg_cells.shape[0], len(q_cells_i), replace=True)]
             cell_mappings_n[group].extend(list(zip(q_cells_i, neg_targets)))
             negatives_for_prediction[group].extend(neg_targets)
-        print(len(cell_mappings[group]), len(cell_mappings_n[group]))
+        # print(len(cell_mappings[group]), len(cell_mappings_n[group]))
         # cell_mappings[group] = list(set(cell_mappings[group])) ## to get unique cell pairs
 
-    print("Cluster matching analysis --> # of same = ", same_ctr, "# of all = ", all_ctr)
+    # print("Cluster matching analysis --> # of same = ", same_ctr, "# of all = ", all_ctr)
 
     # for group in cell_mappings:
     #     for match in cell_mappings[group]:
@@ -419,11 +418,11 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
                 number_map[cluster_type[node]] = cur
                 cur += 1
             color_map.append(number_map[cluster_type[node]])
-        print(cluster_type)
-        print("*" * 100)
-        for group in cell_type_mapping:
-            print(*batch_relations[group], sep = "\n")
-            print(group, cell_type_mapping[group])
+        # print(cluster_type)
+        # print("*" * 100)
+        # for group in cell_type_mapping:
+        #     print(*batch_relations[group], sep = "\n")
+        #     print(group, cell_type_mapping[group])
     else:
         color_map = [1] * len(DG_fig.nodes()) 
     nx.draw(DG_fig, with_labels=True, node_color = color_map)
@@ -505,4 +504,4 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
     if "cluster_s" in exp_data.whole.obs:
         _adata = exp_data.whole.copy() 
         _adata.X = new_features
-        exp_data.whole.obs["SCPRO-HI"] = calc_preds(_adata)
+        exp_data.whole.obs["SCPRO-HI-preds"] = calc_preds(_adata)
