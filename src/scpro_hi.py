@@ -302,7 +302,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
 
         r_batch_relations[cluster] = batch_list[batch_idx]
 
-    for group in new_groups:
+    # for group in new_groups:
         # print("Batch group -> ", group, components[group])
 
     exp_data.whole.obs["group_id"] = np.array(["no-group" if cell not in r_batch_relations else r_batch_relations[cell] for cell in exp_data.whole.obs["cluster_id"]])
