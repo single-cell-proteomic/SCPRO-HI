@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 import scib
 import scanpy as sc
 from scib.metrics import lisi
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score, adjusted_rand_score, normalized_mutual_info_score
 import umap.umap_ as umap
 

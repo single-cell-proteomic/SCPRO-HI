@@ -118,7 +118,7 @@ def hvg_sigmas(dt):
 def multiple_regression(_data, important_genes, target_gene_set):
     return MLPRegressor(random_state = 42).fit(_data[:, important_genes].X, _data[:, target_gene_set].X)
 
-def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend = False):
+def horizontal_integration(exp_data, NIP = 30, cluster_treshold = 0.27, extend = False):
     if NIP > exp_data.whole.shape[1]:
         NIP = exp_data.whole.shape[1]
     whole_cluster_list = []
@@ -184,7 +184,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
             if cluster != cluster2 and cluster.split("_")[1:] != cluster2.split("_")[1:]:
 
                 rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[cluster2])
-                # print(cluster, cluster2, rank)
+                print(cluster, cluster2, rank)
                 if rank > cluster_treshold:
                     cluster_relations[cluster].append((rank, cluster2))
 
@@ -338,7 +338,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
                     for target in target_group:
                         common_hvgs = list(set(query_hvgs) & set(list(cluster_HVGs[target].keys())))
                         target_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == target]
-                        m1, m2 = find_mutual_nn2(query_cells[:, common_hvgs].X, target_cells[:, common_hvgs].X, 200, 200)
+                        m1, m2 = find_mutual_nn2(query_cells[:, common_hvgs].X, target_cells[:, common_hvgs].X, 20, 20)
                         
                         if len(m1) > 0:
                             q_cells_i = query_cells.obs.index.to_numpy()[m1]
@@ -353,7 +353,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.50, extend =
                             cell_mappings_n[group].extend(list(zip(q_cells_i, neg_targets)))
                 else:
                     target_cells = exp_data.whole[exp_data.whole.obs["cluster_id"].isin(target_group)]
-                    m1, m2 = find_mutual_nn2(query_cells.X, target_cells.X, 200, 200)
+                    m1, m2 = find_mutual_nn2(query_cells.X, target_cells.X, 20, 20)
                     # print(query_cells.shape[0], target_cells.shape[0], len(m1))
                     if len(m1) > 0:
                         q_cells_i = query_cells.obs.index.to_numpy()[m1]

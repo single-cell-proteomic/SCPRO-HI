@@ -159,8 +159,8 @@ def integrate(method, _adata):
     elif method == "All":
         Harmony(_adata)
         Scanorama(_adata)
-        MARIO(_adata)
-        MNN(_adata)
-        SCVI(_adata)
+        # MARIO(_adata)
+        # MNN(_adata)
+        # SCVI(_adata)
     else:
         print("The given integration method("+ method +") is not available.")

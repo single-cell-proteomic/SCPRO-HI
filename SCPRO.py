@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import scanpy as sc, anndata as ad
+import pandas as pd
 from sklearn.preprocessing import Normalizer
 
 import sys
@@ -11,15 +12,18 @@ from performance import EVAL, umap_projection
 class scData():
     dataset_list = []
     whole = None
-    def __init__(self, base_path, concat = True, _load = True, sub_sample = True):
+    def __init__(self, base_path, concat = True, _load = False, sub_sample = False):
         directory = os.fsencode(base_path)
         for file in os.listdir(directory):
             filename = os.fsdecode(file)
-            if filename.endswith(".h5ad"):
+            if filename.endswith(".h5ad") or filename.endswith(".h5"):
                 print(filename + " is under process.")
-                tmp_ds = sc.read_h5ad(base_path + "/" + filename)
-                tmp_ds.obs["batch_id"] = np.repeat(os.path.basename(filename).replace(".h5ad",""), tmp_ds.shape[0])
-                tmp_ds.uns["name"] = os.path.basename(filename).replace(".h5ad","")
+                if filename.endswith(".h5ad"):
+                    tmp_ds = sc.read_h5ad(base_path + "/" + filename)
+                else:
+                    tmp_ds = sc.read_hdf(base_path + "/" + filename, "matrix")
+                tmp_ds.obs["batch_id"] = np.repeat(os.path.basename(filename).replace(".h5ad","").replace(".h5",""), tmp_ds.shape[0])
+                tmp_ds.uns["name"] = os.path.basename(filename).replace(".h5ad","").replace(".h5","")
                 if isinstance(tmp_ds.X, np.ndarray) == False:
                     tmp_ds.X = tmp_ds.X.toarray()
                 if sub_sample:
