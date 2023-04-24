@@ -14,8 +14,8 @@ class VAE():
         self.build_model()
         
     def build_model(self):
-        np.random.seed(42)
-        tf.random.set_seed(42)
+        # np.random.seed(42)
+        # tf.random.set_seed(42)
         # Build the encoder network
         # ------------ Input -----------------
         s1_inp = Input(shape=(self.args.input_size,))
@@ -64,7 +64,7 @@ class VAE():
         s2_loss = mean_squared_error(inputs[1], outputs)
         s3_loss = mean_squared_error(inputs[2], outputs)
         
-        reconstruction_loss = s1_loss + s2_loss - s3_loss
+        reconstruction_loss = K.exp(s1_loss + s2_loss - s3_loss)
         vae_loss = K.mean(reconstruction_loss + self.args.beta * distance)
         self.vae.add_loss(vae_loss)
         encoder_metric = tf.keras.metrics.MeanSquaredError(name = 'encoder_metric')
