@@ -8,16 +8,21 @@ from scipy.spatial import cKDTree
 from sklearn.cluster import DBSCAN, MeanShift, KMeans, OPTICS
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPRegressor, MLPClassifier
 from sklearn.tree import DecisionTreeClassifier as DTC
 from sklearn.neighbors import NearestNeighbors
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 # import umap.umap_ as umap
 import pandas as pd
 import plotly.express as px
 from plotly.subplots import make_subplots
 import umap
 from VAE import VAE
+
+import mnnpy
+import anndata as ad
+from sklearn.cross_decomposition import CCA
+import bbknn
 
 class Namespace:
     def __init__(self, **kwargs):
@@ -43,10 +48,10 @@ def umap_projection(X, Y, name):
       color=df[name], labels = {'color': name} 
     )
     fig_2d.show()
-        
+    
 def calc_preds(aData):
     preds = []
-    sc.pp.neighbors(aData)
+    sc.pp.neighbors(aData, n_neighbors = 3)
     print("neighbors are calculating!")
     for i in range (aData.shape[0]):
         nbrs = aData.obsp["connectivities"][i].tocoo().col
@@ -75,8 +80,8 @@ def find_mutual_nn2(data1, data2, k1, k2):
     mutual_1 = []
     mutual_2 = []
     if k1 != 0:
-        k_index_1 = cKDTree(data1).query(x=data2, k=k1)[1]
-        k_index_2 = cKDTree(data2).query(x=data1, k=k2)[1]
+        k_index_1 = cKDTree(data1).query(x=data2, k=k1, workers = 8)[1]
+        k_index_2 = cKDTree(data2).query(x=data1, k=k2, workers = 8)[1]
         if k1 == 1:
             k_index_2 = [k_index_2]
             k_index_1 = [k_index_1]
@@ -96,7 +101,31 @@ def find_mutual_nn2(data1, data2, k1, k2):
             mutual_2 = list(mutual_2)
     return mutual_1, mutual_2
 
-def get_HVGs(_adata, y, NIP):
+def find_mutual_nn3(query, target):
+    mutual_1 = []
+    mutual_2 = []
+    if query.shape[0] != 0 and target.shape[0] != 0:
+        mutual_2 = cKDTree(target).query(x=query, k=1, workers = 8)[1]
+        mutual_1 = np.arange(query.shape[0])
+    return mutual_1, mutual_2
+
+def calculate_mismatch_statistics(true_labels, predicted_labels):
+    
+    mismatch_stats = {}
+
+    for i in range(true_labels.shape[0]):
+        match_id = true_labels[i] + "-" + predicted_labels[i]
+        if match_id not in mismatch_stats:
+            mismatch_stats[match_id] = 0
+        else:
+            mismatch_stats[match_id] += 1 
+    sorted_keys = sorted(mismatch_stats, key=lambda x: mismatch_stats[x])
+    for match in sorted_keys:
+        print(match, " -> ",mismatch_stats[match])
+    df = pd.DataFrame(mismatch_stats, index=[0])
+    df.to_excel('cell type matchings.xlsx')
+        
+def get_HVGs_rf(_adata, y, NIP):
     clf = DTC(random_state=42, max_depth = 3)
     x = _adata.X
     clf.fit(x, y)
@@ -104,11 +133,6 @@ def get_HVGs(_adata, y, NIP):
     
     hvg_treshold = 1
     feature_names = _adata.var.index.values
-    # explainer = shap.Explainer(clf.predict_proba, x)
-    # shap_values = explainer(x)
-    # mean_absolute_shap = np.abs(shap_values.values).mean(axis=0)
-    # print(mean_absolute_shap)
-    # shap.summary_plot(shap_values, x)
     important_features_dict = {}
     for idx, val in enumerate(clf.feature_importances_):
         important_features_dict[feature_names[idx]] = val
@@ -129,29 +153,70 @@ def get_HVGs(_adata, y, NIP):
     filtered_importance_dict = {key: important_features_dict[key] for key in filtered_hvgs}
     return filtered_importance_dict
 
+def get_HVGs(_adata, y, NIP):
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import Dense, Dropout
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score
+    from sklearn.inspection import permutation_importance
+    model = Sequential()
+    model.add(Dense(64, activation='relu', input_shape=(_adata.shape[1],)))
+    model.add(Dropout(0.5))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile the model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+    y = np.array(y)
+    # Train the model
+    model.fit(_adata.X, y, epochs=10, batch_size=32, verbose = False)
+
+    def binary_accuracy(estimator, x, y):
+        y_pred = estimator.predict(x, verbose = False)
+        y_pred_binary = np.where(y_pred >= 0.5, 1, 0)
+        return accuracy_score(y, y_pred_binary)
+
+    # Calculate feature importances using permutation feature importance
+    result = permutation_importance(
+        model,
+        _adata.X,
+        y,
+        n_repeats=1,
+        scoring=binary_accuracy,  # Use custom scoring function
+        random_state=42
+    )
+
+    # Get feature importances and feature names
+    importances = result.importances_mean
+    importances[importances<0] = 0
+    sum_importances = np.sum(importances)
+    if sum_importances > 0:
+        importances = importances / sum_importances
+    
+    
+
+    feature_names = _adata.var.index.values
+    important_features_dict = {}
+    for i in range(feature_names.shape[0]):
+        important_features_dict[feature_names[i]] = importances[i]
+        
+    sorted_features_list = sorted(important_features_dict,
+                            key = important_features_dict.get,
+                            reverse = True)
+    current_importance = 0
+    current_hvg_count = 0
+    filtered_hvgs = []
+    for i in range(len(sorted_features_list)):
+        if current_hvg_count < NIP:
+            filtered_hvgs.append(sorted_features_list[i])
+            current_hvg_count += 1
+            current_importance += important_features_dict[sorted_features_list[i]]
+        else:
+            break
+    filtered_importance_dict = {key: important_features_dict[key] for key in filtered_hvgs}
+    return filtered_importance_dict
 def cluster_distance(c1, c2):
-    # dist = 0
-    # n_common = 0
-    # m_common = 0 
-    # non_zero_c1 = len([x for x in c1 if c1[x] != 0])
-    # non_zero_c2 = len([x for x in c2 if c2[x] != 0])
-    # for prot in c1:
-    #     if prot in c2:
-    #         if c1[prot] > 0 or c2[prot] > 0:
-    #             dist += abs(c1[prot] - c2[prot])
-    #             n_common += 1
-    #             m_common += (c1[prot] + c2[prot]) / 2
-    # non_zeros = max(non_zero_c1, non_zero_c2)
-    # return (1 - (dist / 2)) * m_common
-    ### 2nd formula
-    # similarity = 0
-    # n_common = 0
-    # m_common = 0 
-    # for prot in c1:
-    #     if prot in c2:
-    #         similarity += (1 - abs(c1[prot] - c2[prot])) # * (c1[prot] + c2[prot])
-    # return similarity / 2
-    ### 3rd formula
     similarity = 0
     vec1 = []
     vec2 = []
@@ -187,71 +252,84 @@ def cell_matching_acc(df, mappings):
         ground_labels.extend([i[0] for i in mappings[group]])
         matched_labels.extend([i[1] for i in mappings[group]])
     print(accuracy_score(df[ground_labels].obs["cluster_s"], df[matched_labels].obs["cluster_s"]))
-def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend = False):
+    print("# of matched cells: ", len(ground_labels))
+def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.75, extend = False):
+    
     # if NIP > exp_data.whole.shape[1]:
     NIP = exp_data.whole.shape[1]
     whole_cluster_list = []
     
     cluster_HVGs = {}
     for db in exp_data.dataset_list:
-        if "umap_features" not in db.obsm:
-            db.obsm["umap_features"] = umap.UMAP(n_components = 2).fit_transform(db.X)
-            # # db.obsm["umap_features"] = TSNE(n_components = 2).fit_transform(db.X)
-            # neigh = NearestNeighbors(n_neighbors=2, metric= "euclidean")
-            # nbrs = neigh.fit(db.obsm["umap_features"])
-            # distances, indices = nbrs.kneighbors(db.obsm["umap_features"])
-            # distances = np.sort(distances[:,1], axis=0)
-            # plt.plot(distances)
-            # x = np.arange(len(distances))
-            # _eps = distances[x.argmax()]
-            # print(_eps)
-#             # distances = distances[:,1]
-#             # dist_diffs = (distances[1:] - distances[:-1])
-#             # for i in range (1, len(dist_diffs)):
-#             #     if dist_diffs[i] > dist_diffs[i-1] * 2:
-#             #         curvest = dist_diffs[i]
-#             #         break
-#             # _eps = curvest
+        if "umap" not in db.obsm:
+            db.obsm["umap"] = umap.UMAP(n_components = 5, n_jobs = 8).fit_transform(db.X)
+            # db.write("Data/sub_" + db.uns["name"] + ".h5ad")
+            # sc.pp.neighbors(db)
+            # sc.tl.umap(db)
+            # db.obsm["umap"] = db.obsm["X_umap"]
+            # umap_projection(db.obsm["umap"], db.obs["cluster_s"], db.uns["name"])
+#             # db.obsm["umap"] = db.X
+#             # db.obsm["umap_features"] = TSNE(n_components = 2).fit_transform(db.X)
+#         neigh = NearestNeighbors(n_neighbors=2, metric= "euclidean")
+#         nbrs = neigh.fit(db.obsm["umap"])
+#         distances, indices = nbrs.kneighbors(db.obsm["umap"])
+#         distances = np.sort(distances[:,1], axis=0)
+#         plt.plot(distances)
+#         x = np.arange(len(distances))
+#         _eps = distances[x.argmax()]
+#         print(_eps)
+#         distances = distances[:,1]
+#         dist_diffs = (distances[1:] - distances[:-1])
+#         for i in range (1, len(dist_diffs)):
+#             if dist_diffs[i] > dist_diffs[i-1] * 2:
+#                 curvest = dist_diffs[i]
+#                 break
+#         _eps = curvest
 
-#             # fig = px.scatter(
-#             #     distances, 
-#             #     title='Distance Curve')
-#             # fig.update_xaxes(title_text='Distances')
-#             # fig.update_yaxes(title_text='Distance threashold (espsilon)')
-#             # fig.show()
+#         fig = px.scatter(
+#             distances, 
+#             title='Distance Curve')
+#         fig.update_xaxes(title_text='Distances')
+#         fig.update_yaxes(title_text='Distance threashold (espsilon)')
+#         fig.show()
 #             print(_eps)
-        model = DBSCAN(eps = 0.35, min_samples = 5).fit(db.obsm["umap_features"])
-        # # model = OPTICS(min_samples = 5, max_eps = 0.20).fit(db.X)
-        # model = MeanShift(bandwidth = 1.5).fit(db.obsm["umap_features"])
-        # model = KMeans(n_clusters = 7).fit(db.X)
-        cluster_ids = [str(x) + "_" + db.uns["name"] for x in model.labels_]
+        
+        # model = DBSCAN(eps = 0.35, min_samples = 2).fit(db.obsm["umap"])
+        model = MeanShift(bandwidth = 2.0).fit(db.obsm["umap"])
+        cluster_ids = np.array([str(x) + "_" + db.uns["name"] for x in model.labels_])
+        clusters, cell_counts = np.unique(cluster_ids, return_counts=True)
+        for i in range(len(clusters)):
+            if cell_counts[i] < 50:
+                cluster_ids[cluster_ids==clusters[i]] = clusters[0]
+                
         db.obs["cluster_id"] = cluster_ids
-        # umap_projection(db.X, db.obs["cluster_id"], db.uns["name"])
-        # umap_projection(db.X, db.obs["cluster_s"], db.uns["name"])
+        print("# of clusters: ", len(np.unique(cluster_ids)))
 
 
 
         ################## Assignment of unclustered cells ####################
         print("Number of unclustered cells: ", db[db.obs.cluster_id == "-1_" + db.uns["name"]].shape[0])
-        # clustered_cells = db[db.obs.cluster_id != "-1_" + db.uns["name"]].obs.index.tolist()
-        # KDtree_all = cKDTree(db[clustered_cells].obsm["umap_features"])
-        # for i in range(db.shape[0]):
-        #     if cluster_ids[i] == "-1_" + db.uns["name"]:
-        #         closest_i = clustered_cells[KDtree_all.query(db[i].obsm["umap_features"])[1][0]]
-        #         cluster_ids[i] = db[closest_i].obs.cluster_id.values[0]
+        clustered_cells = db[db.obs.cluster_id != "-1_" + db.uns["name"]].obs.index.tolist()
+        KDtree_all = cKDTree(db[clustered_cells].obsm["umap"])
+        for i in range(db.shape[0]):
+            if cluster_ids[i] == "-1_" + db.uns["name"]:
+                closest_i = clustered_cells[KDtree_all.query(db[i].obsm["umap"])[1][0]]
+                cluster_ids[i] = db[closest_i].obs.cluster_id.values[0]
         db.obs["cluster_id"] = cluster_ids
         whole_cluster_list.extend(cluster_ids)
 
         
         ################## Calculate protein importances ######################
         for cluster in db.obs.cluster_id.unique():
+            print("HVGs are calculating for ", cluster)
             c_label = [1 if x == cluster else 0 for x in list(db.obs.cluster_id)]
             cluster_HVGs[cluster] = get_HVGs(db, c_label, NIP)
+            print(cluster, cluster_HVGs[cluster])
         #######################################################################
-    # for cluster in cluster_HVGs:
-    #     print(cluster, cluster_HVGs[cluster])
+
     exp_data.whole.obs["cluster_id"] = whole_cluster_list
-    ################## calculate cluster matchings ########################
+
+    # ################## calculate cluster matchings ########################
         
     matched_clusters = []
     unmatched_clusters = []
@@ -267,13 +345,17 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
             if cluster != cluster2 and cluster.split("_")[1:] != cluster2.split("_")[1:]:
 
                 rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[cluster2])
-                # print(cluster, cluster2, rank)
-                if rank > cluster_treshold:
-                    cluster_relations[cluster].append((rank, cluster2))
+                cluster_relations[cluster].append((rank, cluster2))
+                
+                print(cluster, cluster2, rank)
+#                 if rank > cluster_treshold:
+#                     cluster_relations[cluster].append((rank, cluster2))
 
                 if most_diff is None or rank < most_diff[0]:
                     most_diff = (rank, cluster2)
-
+        cluster_relations[cluster] = sorted(cluster_relations[cluster], key=lambda x: x[0],  reverse = True)
+        if len(cluster_relations[cluster]) > 1:
+            cluster_relations[cluster] = cluster_relations[cluster][:1]
         if len(cluster_relations[cluster]) > 0:
             cluster_relations[cluster].sort(key = lambda x: x[0], reverse = True)
             cluster_relations[cluster] = [x[1] for x in cluster_relations[cluster]]
@@ -286,17 +368,18 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
     r_batch_relations = {}
     components = {}
     edges = []
-
+    # print(cluster_relations)
     for cluster in cluster_relations:
         for related_cluster in cluster_relations[cluster]:
-            if cluster not in cluster_relations[related_cluster]:
-                cluster_relations[cluster].remove(related_cluster)
-            else:
-                edges.append((cluster, related_cluster))
+            # if cluster not in cluster_relations[related_cluster]:
+            #     cluster_relations[cluster].remove(related_cluster)
+            # else:
+            #     edges.append((cluster, related_cluster)) ###################### Open this part if threshold is on use.
+            edges.append((cluster, related_cluster))
         if len(cluster_relations[cluster]) == 0:
             unmatched_clusters.append(cluster)
 
-    
+    # print(cluster_relations)
     total_unmatched = 0
     for cluster in unmatched_clusters:
         total_unmatched += exp_data.whole[exp_data.whole.obs["cluster_id"] == cluster].shape[0]
@@ -318,24 +401,39 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
         g_counter +=1
     # for group in batch_relations:
     #     print(batch_relations)
+    
+    ######################Refine Groups##########################################
+    
+    # for group in batch_relations:
+    #     for cluster in batch_relations[group]:
+    #         similarity = 0
+    #         for cluster_o in batch_relations[group]:
+    #             if cluster != cluster_o:
+    #                 rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[cluster2])
+    #                 if rank > 0.5:
+    #                     similarity += 1
+    #         if similarity < len(batch_relations[group]) * 0.3:
+    #             batch_relations
+                    
+    
     ################## Second chance for unmatched clusters ######################
-    for group in components:
-        c_label = [1 if x in components[group] else 0 for x in list(exp_data.whole.obs.cluster_id)]
-        cluster_HVGs[group] = get_HVGs(exp_data.whole, c_label, NIP)
+#     for group in components:
+#         c_label = [1 if x in components[group] else 0 for x in list(exp_data.whole.obs.cluster_id)]
+#         cluster_HVGs[group] = get_HVGs(exp_data.whole, c_label, NIP)
 
-    for cluster in list(unmatched_clusters):
-            most_similar = (None, None)
-            for group in batch_relations:
-                rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[group])
-                if most_similar[0] is None or most_similar[0] < rank:
-                    most_similar = (rank, group)
+#     for cluster in list(unmatched_clusters):
+#             most_similar = (None, None)
+#             for group in batch_relations:
+#                 rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[group])
+#                 if most_similar[0] is None or most_similar[0] < rank:
+#                     most_similar = (rank, group)
 
-            if most_similar[0] != None and most_similar[0] > cluster_treshold:
-                batch_relations[most_similar[1]].append((cluster, components[most_similar[1]][0]))
-                cluster_relations[cluster] = [components[most_similar[1]][0]]
-                r_batch_relations[cluster] = most_similar[1]
-                unmatched_clusters.remove(cluster)
-                # print(cluster, most_similar)
+#             if most_similar[0] != None and most_similar[0] > cluster_treshold:
+#                 batch_relations[most_similar[1]].append((cluster, components[most_similar[1]][0]))
+#                 cluster_relations[cluster] = [components[most_similar[1]][0]]
+#                 r_batch_relations[cluster] = most_similar[1]
+#                 unmatched_clusters.remove(cluster)
+#                 # print(cluster, most_similar)
 
 #     tmp_edges = []
 #     for cluster in list(unmatched_clusters):
@@ -345,7 +443,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
 #                 if cluster != cluster2 and cluster.split("_")[1:] != cluster2.split("_")[1:]:
 #                     rank = cluster_distance(cluster_HVGs[cluster], cluster_HVGs[cluster2])
 #                     # print(cluster, "-", cluster2, rank)
-#                     if rank > (cluster_treshold):
+#                     if rank > cluster_treshold - 0.05:
 #                         tmp_relations.append((cluster, cluster2))
 
 #             if len(tmp_relations) > 0:
@@ -367,7 +465,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
 #             r_batch_relations[cluster] = new_group
 #             unmatched_clusters.remove(cluster)
 #         g_counter +=1
-        # print("new_group ---->", new_group, " : ", components[new_group])
+#         print("new_group ---->", new_group, " : ", components[new_group])
 
     batch_list = {}
     new_groups = []
@@ -427,38 +525,34 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
                     for target in target_group:
                         common_hvgs = list(set(query_hvgs) & set(list(cluster_HVGs[target].keys())))
                         target_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == target]
-                        m1, m2 = find_mutual_nn2(query_cells[:, common_hvgs].X, target_cells[:, common_hvgs].X, 20, 20)
+                        # m1, m2 = find_mutual_nn2(query_cells[:, common_hvgs].X, target_cells[:, common_hvgs].X, 20, 20)
+                        m1, m2 = find_mutual_nn3(query_cells[:, common_hvgs].X, target_cells[:, common_hvgs].X)
                         
                         if len(m1) > 0:
                             q_cells_i = query_cells.obs.index.to_numpy()[m1]
                             t_cells_i = target_cells.obs.index.to_numpy()[m2]
-                            # print(q_cells_i.shape[0], t_cells_i.shape[0], len(m1))
+
                             ## for negative samples
                             neg_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == diff_map[cluster_q]]
-                            # print("neg_cells: ", neg_cells.shape)
-                            # neg_targets = neg_cells.obs.index.to_numpy()[cKDTree(neg_cells[:, query_hvgs].X).query(x = query_cells[:, query_hvgs].X, k = neg_cells.shape[0])[:][1][:, neg_cells.shape[0] - 1]]
+
                             neg_targets = neg_cells.obs.index.to_numpy()[np.random.choice(neg_cells.shape[0], len(q_cells_i), replace=True)]
-                            # cell_mappings_n[group].extend(list(zip(q_cells_i, neg_targets)))
+
                             cell_mappings[group].extend(list(zip(q_cells_i,t_cells_i, neg_targets)))
                 else:
                     target_cells = exp_data.whole[exp_data.whole.obs["cluster_id"].isin(target_group)]
                     neg_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == diff_map[cluster_q]]
-                    # print(target_cells.shape, plain_list)
-                    m1, m2 = find_mutual_nn2(query_cells.X, target_cells.X, 50, 50)
-                    # print(query_cells.shape[0], target_cells.shape[0], len(m1))
+
+                    m1, m2 = find_mutual_nn3(query_cells.X, target_cells.X)
+
                     if len(m1) > 0:
                         q_cells_i = query_cells.obs.index.to_numpy()[m1]
                         t_cells_i = target_cells.obs.index.to_numpy()[m2]
-                        ## for negative samples
-                        # neg_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == diff_map[cluster_q]]
+
                         neg_cells = exp_data.whole[exp_data.whole.obs["group_id"] != group]
                         
-                        # neg_targets = neg_cells.obs.index.to_numpy()[cKDTree(neg_cells.X).query(x = query_cells[q_cells_i].X, k = neg_cells.shape[0])[:][1][:, neg_cells.shape[0] - 1]]
                         neg_targets = neg_cells.obs.index.to_numpy()[np.random.choice(neg_cells.shape[0], len(q_cells_i), replace=True)]
-                        # cell_mappings_n[group].extend(list(zip(q_cells_i, neg_targets)))
                         cell_mappings[group].extend(list(zip(q_cells_i,t_cells_i, neg_targets)))
 
-                    # neg_targets = neg_cells.obs.index.to_numpy()[cKDTree(neg_cells[:, query_hvgs].X).query(x = query_cells[:, query_hvgs].X, k = neg_cells.shape[0])[:][1][:, neg_cells.shape[0] - 1]]
                     neg_targets = neg_cells.obs.index.to_numpy()[np.random.choice(neg_cells.shape[0], query_cells.shape[0] , replace=True)]
                     negatives_for_prediction[group].extend(neg_targets) 
                 if "cluster_s" in query_cells.obs:
@@ -478,13 +572,12 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
             
             q_cells_i = query_cells.obs.index.to_numpy()
             neg_cells = exp_data.whole[exp_data.whole.obs["cluster_id"] == diff_map[cluster_q]]
-            # neg_targets = neg_cells.obs.index.to_numpy()[cKDTree(neg_cells[:, query_hvgs].X).query(x = query_cells[:, query_hvgs].X, k = neg_cells.shape[0])[:][1][:, neg_cells.shape[0] - 1]]
+
             neg_targets = neg_cells.obs.index.to_numpy()[np.random.choice(neg_cells.shape[0], len(q_cells_i), replace=True)]
             cell_mappings[group].extend(list(zip(query_cells.obs.index.to_numpy(), query_cells.obs.index.to_numpy(), neg_targets)))
-            # cell_mappings_n[group].extend(list(zip(q_cells_i, neg_targets)))
+
             negatives_for_prediction[group].extend(neg_targets)
-        # print(len(cell_mappings[group]), len(cell_mappings_n[group]))
-        # cell_mappings[group] = list(set(cell_mappings[group])) ## to get unique cell pairs
+
 
     # print("Cluster matching analysis --> # of same = ", same_ctr, "# of all = ", all_ctr)
 
@@ -531,7 +624,7 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
                      latent_size = NIP, 
                      dropout = 0.2, 
                      beta = 1, 
-                     epochs = 500, 
+                     epochs = 100, 
                      batch_size = 16,
                      save_model = False)
 
@@ -563,11 +656,6 @@ def horizontal_integration(exp_data, NIP = 38, cluster_treshold = 0.40, extend =
             train1 = exp_data.whole[list(tuple_cell), cc_HVGs[group]].X
             train2 = exp_data.whole[list(tuple_pos), cc_HVGs[group]].X
             train3 = exp_data.whole[list(tuple_neg), cc_HVGs[group]].X
-            # args.variance, args.sigma, args.mean = hvg_sigmas(train1)
-            # train1 = exp_data.whole[[i[0] for i in cell_mappings[group]], cc_HVGs[group]].X
-            # # args.variance, args.sigma, args.mean = hvg_sigmas(train1)
-            # train2 = exp_data.whole[[i[1] for i in cell_mappings[group]], cc_HVGs[group]].X
-            # train3 = exp_data.whole[[i[1] for i in cell_mappings_n[group]], cc_HVGs[group]].X
             ensemble_model[group] = VAE(args)
             print(len(train1), len(train2), len(train3))
             ensemble_model[group].train(train1, train2, train3)
